@@ -118,4 +118,10 @@ public class Payroll {
         leaveDetails.add(leave);
         leave.setPayroll(this);
     }
+    @OneToMany(
+            mappedBy = "payroll",
+            cascade = CascadeType.ALL,
+            orphanRemoval = true
+    )
+    private List<PayrollDeduction> deductions = new ArrayList<>();
 }
