@@ -27,6 +27,9 @@ public class Payroll {
     @Column(name = "employee_id", nullable = false)
     private Long employeeId;
 
+    @Column(name = "employee_code", nullable = false, length = 30)
+    private String employeeCode;
+
     @Column(name = "employee_name", nullable = false)
     private String employeeName;
 

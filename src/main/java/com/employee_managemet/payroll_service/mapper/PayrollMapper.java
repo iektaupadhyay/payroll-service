@@ -1,11 +1,12 @@
-
 package com.employee_managemet.payroll_service.mapper;
 
 import com.employee_managemet.payroll_service.dto.response.PayrollDeductionResponse;
 import com.employee_managemet.payroll_service.dto.response.PayrollLeaveDetailsResponse;
 import com.employee_managemet.payroll_service.dto.response.PayrollResponse;
 import com.employee_managemet.payroll_service.dto.response.PayrollSummaryResponse;
+
 import com.employee_managemet.payroll_service.model.Payroll;
+
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -18,8 +19,8 @@ public class PayrollMapper {
 
     public PayrollMapper(
             PayrollDeductionMapper deductionMapper,
-            PayrollLeaveDetailsMapper leaveDetailsMapper) {
-
+            PayrollLeaveDetailsMapper leaveDetailsMapper
+    ) {
         this.deductionMapper = deductionMapper;
         this.leaveDetailsMapper = leaveDetailsMapper;
     }
@@ -43,27 +44,39 @@ public class PayrollMapper {
                         .toList();
 
         return new PayrollResponse(
+
                 payroll.getId(),
+
                 payroll.getEmployeeId(),
+                payroll.getEmployeeCode(),
                 payroll.getEmployeeName(),
                 payroll.getEmploymentType(),
+
                 maskAccountNumber(payroll.getBankAccountNumber()),
+
                 payroll.getPayPeriodMonth(),
                 payroll.getPayPeriodYear(),
+
                 payroll.getCtc(),
+
                 payroll.getBasicSalary(),
                 payroll.getHra(),
                 payroll.getFixedBonus(),
                 payroll.getVariableBonus(),
                 payroll.getOtherAllowances(),
+
                 payroll.getGrossSalary(),
                 payroll.getEmployerPf(),
                 payroll.getTotalDeductions(),
                 payroll.getNetSalary(),
+
                 payroll.getPaymentStatus(),
+
                 payroll.getCreditedAt(),
+
                 deductions,
                 leaveDetails,
+
                 payroll.getCreatedAt(),
                 payroll.getUpdatedAt()
         );
@@ -72,14 +85,20 @@ public class PayrollMapper {
     public PayrollSummaryResponse toSummaryResponse(Payroll payroll) {
 
         return new PayrollSummaryResponse(
+
                 payroll.getId(),
+
                 payroll.getEmployeeId(),
+                payroll.getEmployeeCode(),
                 payroll.getEmployeeName(),
+
                 payroll.getPayPeriodMonth(),
                 payroll.getPayPeriodYear(),
+
                 payroll.getGrossSalary(),
                 payroll.getTotalDeductions(),
                 payroll.getNetSalary(),
+
                 payroll.getPaymentStatus()
         );
     }

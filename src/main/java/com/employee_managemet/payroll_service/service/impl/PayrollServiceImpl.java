@@ -84,6 +84,7 @@ public class PayrollServiceImpl implements PayrollService {
         Payroll payroll = new Payroll();
 
         payroll.setEmployeeId(employee.id());
+        payroll.setEmployeeCode(employee.employeeCode());
         payroll.setEmployeeName(employee.name());
         payroll.setEmploymentType(employee.employmentType());
 

@@ -9,15 +9,19 @@ import java.util.List;
 public record PayrollResponse(
 
         Long id,
+
         Long employeeId,
+        String employeeCode,
         String employeeName,
         String employmentType,
+
         String maskedAccountNumber,
 
         Integer payPeriodMonth,
         Integer payPeriodYear,
 
         BigDecimal ctc,
+
         BigDecimal basicSalary,
         BigDecimal hra,
         BigDecimal fixedBonus,
@@ -30,6 +34,7 @@ public record PayrollResponse(
         BigDecimal netSalary,
 
         PayrollStatus paymentStatus,
+
         LocalDateTime creditedAt,
 
         List<PayrollDeductionResponse> deductions,
