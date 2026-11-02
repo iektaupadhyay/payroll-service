@@ -118,6 +118,10 @@ public class Payroll {
         leaveDetails.add(leave);
         leave.setPayroll(this);
     }
+    public void addDeduction(PayrollDeduction deduction) {
+        deductions.add(deduction);
+        deduction.setPayroll(this);
+    }
     @OneToMany(
             mappedBy = "payroll",
             cascade = CascadeType.ALL,

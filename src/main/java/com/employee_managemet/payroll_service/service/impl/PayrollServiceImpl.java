@@ -1,22 +1,32 @@
 package com.employee_managemet.payroll_service.service.impl;
 
 import com.employee_managemet.payroll_service.client.EmployeeServiceClient;
+
 import com.employee_managemet.payroll_service.dto.integration.EmployeeResponse;
 import com.employee_managemet.payroll_service.dto.request.PayrollDeductionRequest;
 import com.employee_managemet.payroll_service.dto.request.PayrollRequest;
 import com.employee_managemet.payroll_service.dto.response.PayrollResponse;
 import com.employee_managemet.payroll_service.dto.response.PayrollSummaryResponse;
+
 import com.employee_managemet.payroll_service.enums.PayrollStatus;
+
+import com.employee_managemet.payroll_service.exception.BusinessRuleViolationException;
+import com.employee_managemet.payroll_service.exception.DuplicatePayrollException;
+import com.employee_managemet.payroll_service.exception.PayrollNotFoundException;
+
 import com.employee_managemet.payroll_service.mapper.PayrollMapper;
+
 import com.employee_managemet.payroll_service.model.Payroll;
 import com.employee_managemet.payroll_service.model.PayrollDeduction;
-import com.employee_managemet.payroll_service.repository.PayrollDeductionRepository;
+
 import com.employee_managemet.payroll_service.repository.PayrollRepository;
+
 import com.employee_managemet.payroll_service.service.PayrollService;
 
-import jakarta.persistence.EntityNotFoundException;
-
 import lombok.RequiredArgsConstructor;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,26 +39,30 @@ import java.util.List;
 @Transactional
 public class PayrollServiceImpl implements PayrollService {
 
+    private static final Logger log =
+            LoggerFactory.getLogger(PayrollServiceImpl.class);
+
     private final PayrollRepository payrollRepository;
-    private final PayrollDeductionRepository deductionRepository;
 
     private final EmployeeServiceClient employeeServiceClient;
+
     private final PayrollMapper payrollMapper;
 
     @Override
     public PayrollResponse createPayroll(PayrollRequest request) {
 
-        // 1. Validate employee through Employee Service
+        log.info(
+                "Creating payroll | employeeId={} | period={}/{}",
+                request.employeeId(),
+                request.payPeriodMonth(),
+                request.payPeriodYear()
+        );
+
+        // 1. Fetch employee from Employee Service
         EmployeeResponse employee =
                 employeeServiceClient.getEmployeeById(request.employeeId());
 
-        if (employee == null) {
-            throw new EntityNotFoundException(
-                    "Employee not found with ID: " + request.employeeId()
-            );
-        }
-
-        // 2. Check whether payroll already exists for this period
+        // 2. Check whether payroll already exists
         payrollRepository
                 .findByEmployeeIdAndPayPeriodMonthAndPayPeriodYear(
                         request.employeeId(),
@@ -56,7 +70,7 @@ public class PayrollServiceImpl implements PayrollService {
                         request.payPeriodYear()
                 )
                 .ifPresent(existing -> {
-                    throw new IllegalArgumentException(
+                    throw new DuplicatePayrollException(
                             "Payroll already exists for employee ID "
                                     + request.employeeId()
                                     + " for "
@@ -86,24 +100,30 @@ public class PayrollServiceImpl implements PayrollService {
         payroll.setVariableBonus(defaultAmount(request.variableBonus()));
         payroll.setOtherAllowances(defaultAmount(request.otherAllowances()));
 
-        // 4. Calculate initial salary totals
+        // 4. Calculate gross salary
         BigDecimal grossSalary = calculateGrossSalary(request);
 
         payroll.setGrossSalary(grossSalary);
 
-        // Employer PF is not included in employee deductions.
-        // Statutory PF calculation will be implemented separately.
+        // Employer PF is maintained separately.
+        // Statutory calculation will be implemented later.
         payroll.setEmployerPf(BigDecimal.ZERO);
 
-        // No deductions have been added at payroll creation.
         payroll.setTotalDeductions(BigDecimal.ZERO);
         payroll.setNetSalary(grossSalary);
 
-        // 5. Initial payroll status
         payroll.setPaymentStatus(PayrollStatus.DRAFT);
 
-        // 6. Persist payroll
+        // 5. Save payroll
         Payroll savedPayroll = payrollRepository.save(payroll);
+
+        log.info(
+                "Payroll created successfully | payrollId={} | employeeId={} | period={}/{}",
+                savedPayroll.getId(),
+                employee.id(),
+                request.payPeriodMonth(),
+                request.payPeriodYear()
+        );
 
         return payrollMapper.toResponse(savedPayroll);
     }
@@ -111,6 +131,8 @@ public class PayrollServiceImpl implements PayrollService {
     @Override
     @Transactional(readOnly = true)
     public PayrollResponse getPayrollById(Long payrollId) {
+
+        log.debug("Fetching payroll | payrollId={}", payrollId);
 
         Payroll payroll = findPayrollById(payrollId);
 
@@ -123,10 +145,21 @@ public class PayrollServiceImpl implements PayrollService {
             Long employeeId
     ) {
 
-        return payrollRepository.findByEmployeeId(employeeId)
-                .stream()
-                .map(payrollMapper::toSummaryResponse)
-                .toList();
+        log.debug("Fetching payroll history | employeeId={}", employeeId);
+
+        List<PayrollSummaryResponse> history =
+                payrollRepository.findByEmployeeId(employeeId)
+                        .stream()
+                        .map(payrollMapper::toSummaryResponse)
+                        .toList();
+
+        log.debug(
+                "Payroll history retrieved | employeeId={} | recordCount={}",
+                employeeId,
+                history.size()
+        );
+
+        return history;
     }
 
     @Override
@@ -136,11 +169,27 @@ public class PayrollServiceImpl implements PayrollService {
             Integer year
     ) {
 
-        return payrollRepository
-                .findByPayPeriodMonthAndPayPeriodYear(month, year)
-                .stream()
-                .map(payrollMapper::toSummaryResponse)
-                .toList();
+        log.debug(
+                "Fetching payroll by period | month={} | year={}",
+                month,
+                year
+        );
+
+        List<PayrollSummaryResponse> payrolls =
+                payrollRepository
+                        .findByPayPeriodMonthAndPayPeriodYear(month, year)
+                        .stream()
+                        .map(payrollMapper::toSummaryResponse)
+                        .toList();
+
+        log.debug(
+                "Payroll records retrieved | month={} | year={} | recordCount={}",
+                month,
+                year,
+                payrolls.size()
+        );
+
+        return payrolls;
     }
 
     @Override
@@ -149,39 +198,58 @@ public class PayrollServiceImpl implements PayrollService {
             PayrollDeductionRequest request
     ) {
 
+        log.info(
+                "Adding deduction | payrollId={} | deductionType={}",
+                payrollId,
+                request.deductionType()
+        );
+
         // 1. Find payroll
         Payroll payroll = findPayrollById(payrollId);
 
-        // 2. Create deduction
-        PayrollDeduction deduction = new PayrollDeduction();
-
-        deduction.setPayroll(payroll);
-        deduction.setDeductionType(request.deductionType());
-        deduction.setAmount(request.amount());
-        deduction.setDescription(request.description());
-
-        // 3. Save deduction
-        deductionRepository.save(deduction);
-
-        // 4. Update deduction total
+        // 2. Calculate updated deductions
         BigDecimal currentDeductions =
                 defaultAmount(payroll.getTotalDeductions());
 
         BigDecimal updatedDeductions =
                 currentDeductions.add(request.amount());
 
-        payroll.setTotalDeductions(updatedDeductions);
-
-        // 5. Recalculate net salary
+        // 3. Calculate resulting net salary
         BigDecimal grossSalary =
                 defaultAmount(payroll.getGrossSalary());
 
-        payroll.setNetSalary(
-                grossSalary.subtract(updatedDeductions)
-        );
+        BigDecimal updatedNetSalary =
+                grossSalary.subtract(updatedDeductions);
 
-        // 6. Save updated payroll
+        if (updatedNetSalary.compareTo(BigDecimal.ZERO) < 0) {
+
+            throw new BusinessRuleViolationException(
+                    "Total deductions cannot exceed gross salary."
+            );
+        }
+
+        // 4. Create deduction
+        PayrollDeduction deduction = new PayrollDeduction();
+
+        deduction.setDeductionType(request.deductionType());
+        deduction.setAmount(request.amount());
+        deduction.setDescription(request.description());
+
+        // Synchronize both sides of the relationship
+        payroll.addDeduction(deduction);
+
+        // 5. Update payroll totals
+        payroll.setTotalDeductions(updatedDeductions);
+        payroll.setNetSalary(updatedNetSalary);
+
+        // 6. Cascade saves the deduction as well
         Payroll updatedPayroll = payrollRepository.save(payroll);
+
+        log.info(
+                "Deduction added successfully | payrollId={} | deductionId={}",
+                updatedPayroll.getId(),
+                deduction.getId()
+        );
 
         return payrollMapper.toResponse(updatedPayroll);
     }
@@ -189,7 +257,7 @@ public class PayrollServiceImpl implements PayrollService {
     private Payroll findPayrollById(Long payrollId) {
 
         return payrollRepository.findById(payrollId)
-                .orElseThrow(() -> new EntityNotFoundException(
+                .orElseThrow(() -> new PayrollNotFoundException(
                         "Payroll not found with ID: " + payrollId
                 ));
     }
