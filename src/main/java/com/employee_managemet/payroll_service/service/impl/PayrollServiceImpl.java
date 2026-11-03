@@ -12,6 +12,7 @@ import com.employee_managemet.payroll_service.enums.PayrollStatus;
 
 import com.employee_managemet.payroll_service.exception.BusinessRuleViolationException;
 import com.employee_managemet.payroll_service.exception.DuplicatePayrollException;
+import com.employee_managemet.payroll_service.exception.InvalidPayrollStatusTransitionException;
 import com.employee_managemet.payroll_service.exception.PayrollNotFoundException;
 
 import com.employee_managemet.payroll_service.mapper.PayrollMapper;
@@ -32,6 +33,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -43,9 +45,7 @@ public class PayrollServiceImpl implements PayrollService {
             LoggerFactory.getLogger(PayrollServiceImpl.class);
 
     private final PayrollRepository payrollRepository;
-
     private final EmployeeServiceClient employeeServiceClient;
-
     private final PayrollMapper payrollMapper;
 
     @Override
@@ -62,7 +62,7 @@ public class PayrollServiceImpl implements PayrollService {
         EmployeeResponse employee =
                 employeeServiceClient.getEmployeeById(request.employeeId());
 
-        // 2. Check whether payroll already exists
+        // 2. Check for duplicate payroll
         payrollRepository
                 .findByEmployeeIdAndPayPeriodMonthAndPayPeriodYear(
                         request.employeeId(),
@@ -80,7 +80,7 @@ public class PayrollServiceImpl implements PayrollService {
                     );
                 });
 
-        // 3. Create payroll entity
+        // 3. Create payroll
         Payroll payroll = new Payroll();
 
         payroll.setEmployeeId(employee.id());
@@ -101,29 +101,25 @@ public class PayrollServiceImpl implements PayrollService {
         payroll.setVariableBonus(defaultAmount(request.variableBonus()));
         payroll.setOtherAllowances(defaultAmount(request.otherAllowances()));
 
-        // 4. Calculate gross salary
+        // 4. Calculate initial salary
         BigDecimal grossSalary = calculateGrossSalary(request);
 
         payroll.setGrossSalary(grossSalary);
-
-        // Employer PF is maintained separately.
-        // Statutory calculation will be implemented later.
         payroll.setEmployerPf(BigDecimal.ZERO);
-
         payroll.setTotalDeductions(BigDecimal.ZERO);
         payroll.setNetSalary(grossSalary);
 
+        // 5. Initial status
         payroll.setPaymentStatus(PayrollStatus.DRAFT);
 
-        // 5. Save payroll
+        // 6. Persist
         Payroll savedPayroll = payrollRepository.save(payroll);
 
         log.info(
-                "Payroll created successfully | payrollId={} | employeeId={} | period={}/{}",
+                "Payroll created | payrollId={} | employeeId={} | status={}",
                 savedPayroll.getId(),
                 employee.id(),
-                request.payPeriodMonth(),
-                request.payPeriodYear()
+                savedPayroll.getPaymentStatus()
         );
 
         return payrollMapper.toResponse(savedPayroll);
@@ -148,19 +144,10 @@ public class PayrollServiceImpl implements PayrollService {
 
         log.debug("Fetching payroll history | employeeId={}", employeeId);
 
-        List<PayrollSummaryResponse> history =
-                payrollRepository.findByEmployeeId(employeeId)
-                        .stream()
-                        .map(payrollMapper::toSummaryResponse)
-                        .toList();
-
-        log.debug(
-                "Payroll history retrieved | employeeId={} | recordCount={}",
-                employeeId,
-                history.size()
-        );
-
-        return history;
+        return payrollRepository.findByEmployeeId(employeeId)
+                .stream()
+                .map(payrollMapper::toSummaryResponse)
+                .toList();
     }
 
     @Override
@@ -176,21 +163,11 @@ public class PayrollServiceImpl implements PayrollService {
                 year
         );
 
-        List<PayrollSummaryResponse> payrolls =
-                payrollRepository
-                        .findByPayPeriodMonthAndPayPeriodYear(month, year)
-                        .stream()
-                        .map(payrollMapper::toSummaryResponse)
-                        .toList();
-
-        log.debug(
-                "Payroll records retrieved | month={} | year={} | recordCount={}",
-                month,
-                year,
-                payrolls.size()
-        );
-
-        return payrolls;
+        return payrollRepository
+                .findByPayPeriodMonthAndPayPeriodYear(month, year)
+                .stream()
+                .map(payrollMapper::toSummaryResponse)
+                .toList();
     }
 
     @Override
@@ -200,22 +177,22 @@ public class PayrollServiceImpl implements PayrollService {
     ) {
 
         log.info(
-                "Adding deduction | payrollId={} | deductionType={}",
+                "Adding deduction | payrollId={} | type={}",
                 payrollId,
                 request.deductionType()
         );
 
-        // 1. Find payroll
         Payroll payroll = findPayrollById(payrollId);
 
-        // 2. Calculate updated deductions
+        // Deductions can only be modified before processing.
+        ensurePayrollIsEditable(payroll);
+
         BigDecimal currentDeductions =
                 defaultAmount(payroll.getTotalDeductions());
 
         BigDecimal updatedDeductions =
                 currentDeductions.add(request.amount());
 
-        // 3. Calculate resulting net salary
         BigDecimal grossSalary =
                 defaultAmount(payroll.getGrossSalary());
 
@@ -223,36 +200,133 @@ public class PayrollServiceImpl implements PayrollService {
                 grossSalary.subtract(updatedDeductions);
 
         if (updatedNetSalary.compareTo(BigDecimal.ZERO) < 0) {
-
             throw new BusinessRuleViolationException(
                     "Total deductions cannot exceed gross salary."
             );
         }
 
-        // 4. Create deduction
         PayrollDeduction deduction = new PayrollDeduction();
 
         deduction.setDeductionType(request.deductionType());
         deduction.setAmount(request.amount());
         deduction.setDescription(request.description());
 
-        // Synchronize both sides of the relationship
         payroll.addDeduction(deduction);
 
-        // 5. Update payroll totals
         payroll.setTotalDeductions(updatedDeductions);
         payroll.setNetSalary(updatedNetSalary);
 
-        // 6. Cascade saves the deduction as well
         Payroll updatedPayroll = payrollRepository.save(payroll);
 
         log.info(
-                "Deduction added successfully | payrollId={} | deductionId={}",
+                "Deduction added | payrollId={} | deductionId={}",
                 updatedPayroll.getId(),
                 deduction.getId()
         );
 
         return payrollMapper.toResponse(updatedPayroll);
+    }
+
+    @Override
+    public PayrollResponse updatePayrollStatus(
+            Long payrollId,
+            PayrollStatus newStatus
+    ) {
+
+        log.info(
+                "Updating payroll status | payrollId={} | targetStatus={}",
+                payrollId,
+                newStatus
+        );
+
+        // 1. Fetch payroll
+        Payroll payroll = findPayrollById(payrollId);
+
+        // 2. Read current status
+        PayrollStatus currentStatus = payroll.getPaymentStatus();
+
+        // 3. Validate transition
+        if (!isValidTransition(currentStatus, newStatus)) {
+
+            log.warn(
+                    "Invalid payroll status transition | payrollId={} | from={} | to={}",
+                    payrollId,
+                    currentStatus,
+                    newStatus
+            );
+
+            throw new InvalidPayrollStatusTransitionException(
+                    "Cannot change payroll status from "
+                            + currentStatus
+                            + " to "
+                            + newStatus
+            );
+        }
+
+        // 4. Update status
+        payroll.setPaymentStatus(newStatus);
+
+        // 5. Maintain credit timestamp
+        if (newStatus == PayrollStatus.CREDITED) {
+            payroll.setCreditedAt(LocalDateTime.now());
+        } else {
+            payroll.setCreditedAt(null);
+        }
+
+        // 6. Persist
+        Payroll updatedPayroll = payrollRepository.save(payroll);
+
+        log.info(
+                "Payroll status updated successfully | payrollId={} | from={} | to={}",
+                payrollId,
+                currentStatus,
+                newStatus
+        );
+
+        return payrollMapper.toResponse(updatedPayroll);
+    }
+
+    private boolean isValidTransition(
+            PayrollStatus currentStatus,
+            PayrollStatus newStatus
+    ) {
+
+        if (currentStatus == null || newStatus == null) {
+            return false;
+        }
+
+        return switch (currentStatus) {
+
+            case DRAFT ->
+                    newStatus == PayrollStatus.PENDING
+                            || newStatus == PayrollStatus.CANCELLED;
+
+            case PENDING ->
+                    newStatus == PayrollStatus.PROCESSING
+                            || newStatus == PayrollStatus.CANCELLED;
+
+            case PROCESSING ->
+                    newStatus == PayrollStatus.CREDITED
+                            || newStatus == PayrollStatus.FAILED;
+
+            case FAILED ->
+                    newStatus == PayrollStatus.PROCESSING;
+
+            case CREDITED, CANCELLED -> false;
+        };
+    }
+
+    private void ensurePayrollIsEditable(Payroll payroll) {
+
+        PayrollStatus status = payroll.getPaymentStatus();
+
+        if (status != PayrollStatus.DRAFT
+                && status != PayrollStatus.PENDING) {
+
+            throw new BusinessRuleViolationException(
+                    "Payroll cannot be modified when its status is " + status
+            );
+        }
     }
 
     private Payroll findPayrollById(Long payrollId) {

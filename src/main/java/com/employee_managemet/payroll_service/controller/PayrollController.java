@@ -2,6 +2,7 @@ package com.employee_managemet.payroll_service.controller;
 
 import com.employee_managemet.payroll_service.dto.request.PayrollDeductionRequest;
 import com.employee_managemet.payroll_service.dto.request.PayrollRequest;
+import com.employee_managemet.payroll_service.dto.request.PayrollStatusUpdateRequest;
 import com.employee_managemet.payroll_service.dto.response.PayrollResponse;
 import com.employee_managemet.payroll_service.dto.response.PayrollSummaryResponse;
 
@@ -88,6 +89,19 @@ public class PayrollController {
 
         return ResponseEntity.ok(
                 payrollService.addDeduction(payrollId, request)
+        );
+    }
+    @PatchMapping("/{payrollId}/status")
+    public ResponseEntity<PayrollResponse> updatePayrollStatus(
+            @PathVariable("payrollId") @Positive Long payrollId,
+            @Valid @RequestBody PayrollStatusUpdateRequest request
+    ) {
+
+        return ResponseEntity.ok(
+                payrollService.updatePayrollStatus(
+                        payrollId,
+                        request.status()
+                )
         );
     }
 }

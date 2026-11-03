@@ -1,12 +1,7 @@
 package com.employee_managemet.payroll_service.exception.handler;
 
 import com.employee_managemet.payroll_service.dto.response.ApiErrorResponse;
-import com.employee_managemet.payroll_service.exception.BusinessRuleViolationException;
-import com.employee_managemet.payroll_service.exception.DuplicatePayrollException;
-import com.employee_managemet.payroll_service.exception.EmployeeNotFoundException;
-import com.employee_managemet.payroll_service.exception.EmployeeServiceException;
-import com.employee_managemet.payroll_service.exception.EmployeeServiceUnavailableException;
-import com.employee_managemet.payroll_service.exception.PayrollNotFoundException;
+import com.employee_managemet.payroll_service.exception.*;
 
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.validation.ConstraintViolationException;
@@ -29,6 +24,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -466,5 +462,45 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(status)
                 .body(response);
+    }
+    @ExceptionHandler(InvalidPayrollStatusTransitionException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidStatusTransition(
+            InvalidPayrollStatusTransitionException exception,
+            HttpServletRequest request
+    ) {
+
+        log.warn(
+                "Invalid payroll status transition | path={} | message={}",
+                request.getRequestURI(),
+                exception.getMessage()
+        );
+
+        return buildResponse(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                exception.getMessage(),
+                request,
+                Map.of()
+        );
+    }
+    @ExceptionHandler(NoHandlerFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleNoHandlerFoundException(
+            NoHandlerFoundException ex,
+            HttpServletRequest request) {
+
+        log.warn("Endpoint not found | method={} | path={}",
+                request.getMethod(),
+                request.getRequestURI());
+
+        ApiErrorResponse response = new ApiErrorResponse(
+                Instant.now(),
+                HttpStatus.NOT_FOUND.value(),
+                "Not Found",
+                "The requested endpoint does not exist",
+                request.getRequestURI(),
+                MDC.get("correlationId"),
+                Map.of()
+        );
+
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
     }
 }

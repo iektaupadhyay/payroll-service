@@ -4,6 +4,7 @@ import com.employee_managemet.payroll_service.dto.request.PayrollDeductionReques
 import com.employee_managemet.payroll_service.dto.request.PayrollRequest;
 import com.employee_managemet.payroll_service.dto.response.PayrollResponse;
 import com.employee_managemet.payroll_service.dto.response.PayrollSummaryResponse;
+import com.employee_managemet.payroll_service.enums.PayrollStatus;
 
 import java.util.List;
 
@@ -23,5 +24,10 @@ public interface PayrollService {
     PayrollResponse addDeduction(
             Long payrollId,
             PayrollDeductionRequest request
+    );
+
+    PayrollResponse updatePayrollStatus(
+            Long payrollId,
+            PayrollStatus newStatus
     );
 }
